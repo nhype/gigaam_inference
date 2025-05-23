@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
 import tempfile
@@ -41,6 +42,15 @@ app = FastAPI(
     description="API for transcribing audio files using Gigaam model",
     version="1.0.0",
     lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 @app.get("/")
@@ -221,4 +231,25 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=4444) 
+    import ssl
+    
+    # Check if SSL certificates are available
+    ssl_cert_path = os.environ.get('SSL_CERT_PATH', '/app/certs/fullchain.pem')
+    ssl_key_path = os.environ.get('SSL_KEY_PATH', '/app/certs/privkey.pem')
+    
+    if os.path.exists(ssl_cert_path) and os.path.exists(ssl_key_path):
+        print("SSL certificates found, starting HTTPS server on port 4443")
+        
+        # Start HTTPS server only
+        uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=4443,
+            ssl_certfile=ssl_cert_path,
+            ssl_keyfile=ssl_key_path
+        )
+    else:
+        print("ERROR: SSL certificates not found. HTTPS-only mode requires certificates.")
+        print(f"Expected cert: {ssl_cert_path}")
+        print(f"Expected key: {ssl_key_path}")
+        raise FileNotFoundError("SSL certificates are required for HTTPS-only mode") 

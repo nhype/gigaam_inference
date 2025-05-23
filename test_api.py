@@ -6,14 +6,18 @@ import requests
 import json
 import sys
 from pathlib import Path
+import urllib3
 
-API_BASE_URL = "http://localhost:4444"
+# Disable SSL warnings for self-signed certificates
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+API_BASE_URL = "https://localhost:4443"
 
 def test_health_endpoint():
     """Test the health check endpoint"""
     print("Testing health endpoint...")
     try:
-        response = requests.get(f"{API_BASE_URL}/health")
+        response = requests.get(f"{API_BASE_URL}/health", verify=False)
         if response.status_code == 200:
             print("✅ Health check passed")
             print(f"Response: {response.json()}")
@@ -29,7 +33,7 @@ def test_root_endpoint():
     """Test the root endpoint"""
     print("\nTesting root endpoint...")
     try:
-        response = requests.get(f"{API_BASE_URL}/")
+        response = requests.get(f"{API_BASE_URL}/", verify=False)
         if response.status_code == 200:
             print("✅ Root endpoint accessible")
             print(f"Response: {response.json()}")
@@ -59,7 +63,7 @@ def test_transcription_endpoint(audio_file_path=None):
         with open(audio_path, 'rb') as f:
             files = {'file': f}
             print(f"Uploading {audio_path.name}...")
-            response = requests.post(f"{API_BASE_URL}/transcribe", files=files)
+            response = requests.post(f"{API_BASE_URL}/transcribe", files=files, verify=False)
         
         if response.status_code == 200:
             result = response.json()
@@ -84,7 +88,7 @@ def test_docs_endpoint():
     """Test if docs are accessible"""
     print("\nTesting documentation endpoint...")
     try:
-        response = requests.get(f"{API_BASE_URL}/docs")
+        response = requests.get(f"{API_BASE_URL}/docs", verify=False)
         if response.status_code == 200:
             print("✅ API documentation accessible at /docs")
             return True
@@ -97,7 +101,7 @@ def test_docs_endpoint():
 
 def main():
     """Run all tests"""
-    print("🧪 Testing Audio Transcription API")
+    print("🧪 Testing Audio Transcription API (HTTPS)")
     print("=" * 50)
     
     tests = [
@@ -130,6 +134,7 @@ def main():
     
     print(f"\nAPI is running at: {API_BASE_URL}")
     print(f"Interactive docs: {API_BASE_URL}/docs")
+    print("🔒 Using HTTPS with self-signed certificates")
 
 if __name__ == "__main__":
     main() 

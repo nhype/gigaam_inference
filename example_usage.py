@@ -9,8 +9,12 @@ import json
 import time
 from pathlib import Path
 import sys
+import urllib3
 
-API_BASE_URL = "http://localhost:4444"
+# Disable SSL warnings for self-signed certificates
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+API_BASE_URL = "https://localhost:4443"
 
 def check_api_status():
     """Check if the API is running and healthy"""
@@ -18,7 +22,7 @@ def check_api_status():
     
     try:
         # Check health endpoint
-        response = requests.get(f"{API_BASE_URL}/health", timeout=5)
+        response = requests.get(f"{API_BASE_URL}/health", timeout=5, verify=False)
         if response.status_code == 200:
             health_data = response.json()
             print(f"✅ API is healthy")
@@ -54,7 +58,8 @@ def transcribe_file(file_path: str):
             response = requests.post(
                 f"{API_BASE_URL}/transcribe",
                 files=files,
-                timeout=300  # 5 minute timeout
+                timeout=300,  # 5 minute timeout
+                verify=False
             )
             
             processing_time = time.time() - start_time
@@ -93,7 +98,7 @@ def transcribe_file(file_path: str):
 
 def demonstrate_api():
     """Demonstrate API endpoints"""
-    print("🚀 Audio Transcription API - Example Usage")
+    print("🚀 Audio Transcription API - Example Usage (HTTPS)")
     print("=" * 60)
     
     # Check API status
@@ -109,7 +114,7 @@ def demonstrate_api():
     # Test root endpoint
     print("\n🏠 Testing root endpoint...")
     try:
-        response = requests.get(f"{API_BASE_URL}/")
+        response = requests.get(f"{API_BASE_URL}/", verify=False)
         if response.status_code == 200:
             data = response.json()
             print(f"✅ {data.get('message', 'API responded')}")
@@ -146,6 +151,7 @@ def main():
         print(f"   {sys.argv[0]} my_recording.webm")
         print("\n   To create a test WebM file, you can use FFmpeg:")
         print("   ffmpeg -f lavfi -i 'sine=frequency=1000:duration=5' -c:a libopus test.webm")
+        print("\n🔒 Using HTTPS with self-signed certificates")
 
 if __name__ == "__main__":
     main() 

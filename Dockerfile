@@ -20,16 +20,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY main.py .
 
+# Create directories for certificates
+RUN mkdir -p /app/certs
+
 # Create a non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Expose port 4444
-EXPOSE 4444
+# Expose port 4443 (HTTPS only)
+EXPOSE 4443
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:4444/health || exit 1
+    CMD curl -k -f https://localhost:4443/health || exit 1
 
 # Run the application
 CMD ["python", "main.py"] 

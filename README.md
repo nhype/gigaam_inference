@@ -1,33 +1,51 @@
-# Audio Transcription API
+# Audio Transcription Service
 
-A FastAPI-based service that transcribes audio files using the Gigaam model (v2_ctc). The service automatically splits audio files longer than 29 seconds into smaller chunks for optimal processing and returns the complete transcription.
+A complete audio transcription solution with a FastAPI backend and React frontend. Upload audio files through a beautiful web interface and get instant transcriptions using the Gigaam model (v2_ctc).
 
 ## Features
 
-- 🎵 Accept WebM audio files via HTTP upload
+### Backend API
+- 🎵 Accept multiple audio formats (MP3, WAV, OGG, WebM, M4A, AAC)
 - ⏱️ Automatic audio duration detection
 - ✂️ Smart audio splitting for files > 29 seconds
 - 🤖 Transcription using Gigaam v2_ctc model
 - 🐳 Fully containerized with Docker
 - 📝 Clean transcription results with full text
 - 🏥 Health check endpoints
-- 🚀 Easy deployment with included scripts
+- 🔗 CORS-enabled for web frontend
+
+### Frontend Web App
+- 🎤 **Drag & Drop Upload**: Intuitive file upload interface
+- 📱 **Responsive Design**: Works on desktop, tablet, and mobile
+- 🚀 **Real-time Processing**: Live progress indicators
+- 📋 **Copy Results**: One-click copy to clipboard
+- ⚡ **Modern UI/UX**: Beautiful design with smooth animations
+- 🔄 **Auto Error Handling**: User-friendly error messages
 
 ## Quick Start
 
 ### One-Command Setup
 
 ```bash
-# Start the service (builds and runs everything)
-./start.sh
+# Start both services (API + Frontend)
+docker compose up --build -d
 
-# The API will be available at http://localhost:4444
+# Access the web interface at http://localhost:4445
+# API documentation at http://localhost:4444/docs
 ```
 
-### Testing the API
+### Using the Web Interface
+
+1. Open http://localhost:4445 in your browser
+2. Drag and drop an audio file or click to browse
+3. Click "Transcribe Audio" 
+4. Wait for processing (progress indicator shown)
+5. Copy or view your transcription results
+
+### Testing the API Directly
 
 ```bash
-# Test without audio file (basic endpoints)
+# Test basic endpoints
 python test_api.py
 
 # Test with audio file
@@ -36,6 +54,20 @@ python test_api.py path/to/audio.webm
 # Run example usage
 python example_usage.py path/to/audio.webm
 ```
+
+## Services Overview
+
+### Frontend (Port 4445)
+- **URL**: http://localhost:4445
+- **Technology**: React 18 + Nginx
+- **Features**: File upload, drag & drop, transcription display
+- **Mobile-friendly**: Responsive design for all devices
+
+### API Backend (Port 4444)  
+- **URL**: http://localhost:4444
+- **Documentation**: http://localhost:4444/docs
+- **Technology**: FastAPI + Gigaam
+- **Features**: Audio processing and transcription
 
 ## API Endpoints
 
@@ -72,7 +104,42 @@ Interactive API documentation (Swagger UI).
 
 ## Deployment Options
 
-### Using the Start Script (Recommended)
+### Using Docker Compose (Recommended)
+
+```bash
+# Build and start both services
+docker compose up --build -d
+
+# View logs for both services
+docker compose logs -f
+
+# View logs for specific service
+docker compose logs -f audio-transcription-api
+docker compose logs -f audio-transcription-frontend
+
+# Stop all services
+docker compose down
+
+# Restart services
+docker compose restart
+```
+
+### Individual Service Deployment
+
+#### Frontend Only
+```bash
+cd frontend
+docker build -t audio-transcription-frontend .
+docker run -d -p 4445:80 --name frontend audio-transcription-frontend
+```
+
+#### API Only  
+```bash
+docker build -t audio-transcription-api .
+docker run -d -p 4444:4444 --name api audio-transcription-api
+```
+
+### Using the Start Script
 
 ```bash
 # Start the service
@@ -91,31 +158,17 @@ Interactive API documentation (Swagger UI).
 ./start.sh build
 ```
 
-### Using Docker Compose
-
-```bash
-# Build and start
-docker compose up --build -d
-
-# Stop
-docker compose down
-
-# View logs
-docker compose logs -f
-```
-
-### Using Docker
-
-```bash
-# Build the image
-docker build -t audio-transcription-api .
-
-# Run the container
-docker run -d -p 4444:4444 --name audio-transcription-api audio-transcription-api
-```
-
 ### Local Development
 
+#### Frontend Development
+```bash
+cd frontend
+npm install
+npm start
+# Available at http://localhost:3000
+```
+
+#### API Development
 ```bash
 # Install dependencies
 pip install -r requirements.txt
@@ -126,6 +179,7 @@ pip install -r requirements.txt
 
 # Run the application
 python main.py
+# Available at http://localhost:4444
 ```
 
 ## Usage Examples
@@ -214,13 +268,25 @@ The service includes comprehensive health checks:
 .
 ├── main.py                 # FastAPI application
 ├── requirements.txt        # Python dependencies
-├── Dockerfile             # Container definition
-├── docker-compose.yml     # Service orchestration
+├── Dockerfile             # Backend container definition
+├── docker-compose.yml     # Service orchestration (API + Frontend)
 ├── start.sh               # Deployment script
 ├── test_api.py            # API testing script
 ├── example_usage.py       # Usage examples
 ├── .dockerignore          # Docker build optimization
-└── README.md              # Documentation
+├── frontend/              # React frontend application
+│   ├── public/            # Static files
+│   │   └── index.html     # HTML template
+│   ├── src/               # React source code
+│   │   ├── App.js         # Main React component
+│   │   ├── App.css        # Styling
+│   │   └── index.js       # React entry point
+│   ├── package.json       # Node.js dependencies
+│   ├── Dockerfile         # Frontend container definition
+│   ├── nginx.conf         # Nginx configuration
+│   ├── .dockerignore      # Frontend build optimization
+│   └── README.md          # Frontend documentation
+└── README.md              # Project documentation
 ```
 
 ## Troubleshooting
