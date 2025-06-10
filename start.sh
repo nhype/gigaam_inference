@@ -60,7 +60,6 @@ start_service() {
     echo "🔧 API endpoints (HTTPS only):"
     echo "   📡 API Base: https://localhost:4443"
     echo "   ❤️  Health: https://localhost:4443/health"
-    echo "   📖 Docs: https://localhost:4443/docs"
     echo ""
     echo "📝 Testing options:"
     echo "   🌐 Use web interface: https://localhost:4446"

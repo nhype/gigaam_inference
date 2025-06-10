@@ -30,7 +30,6 @@ A complete audio transcription solution with a FastAPI backend and React fronten
 ### Current Production URLs
 - **Frontend**: https://195.35.3.51:4446
 - **API Backend**: https://195.35.3.51:4443
-- **API Documentation**: https://195.35.3.51:4443/docs
 
 ### SSL Certificate Configuration
 The service requires SSL certificates from `/root/n8n-certs/` for HTTPS support:
@@ -48,7 +47,6 @@ The service requires SSL certificates from `/root/n8n-certs/` for HTTPS support:
 docker compose up --build -d
 
 # Access the web interface at https://your-domain:4446
-# API documentation at https://your-domain:4443/docs
 ```
 
 ### Development Setup
@@ -62,7 +60,6 @@ For local development, you'll need to either:
 docker compose up --build -d
 
 # Access the web interface at https://localhost:4446 (with certs)
-# API documentation at https://localhost:4443/docs (with certs)
 ```
 
 ### Using the Web Interface
@@ -92,7 +89,6 @@ The frontend includes robust connection management:
 
 ### API Backend (Port 4443 - Production / 4444 - Development)  
 - **Production URL**: https://195.35.3.51:4443
-- **Documentation**: https://195.35.3.51:4443/docs
 - **Technology**: FastAPI + Gigaam with SSL support
 - **Features**: Audio processing and transcription with HTTPS/CORS
 
@@ -150,9 +146,6 @@ Health check endpoint with model loading status.
   "model_status": "loaded"
 }
 ```
-
-### `GET /docs`
-Interactive API documentation (Swagger UI).
 
 ## Deployment Options
 
@@ -332,7 +325,6 @@ docker compose restart
 
 ### Testing
 - Health check: `curl https://localhost:4443/health`
-- API documentation: Visit `https://localhost:4443/docs`
 - Upload test: Use the web interface at `https://localhost:4446`
 
 ## Performance Notes

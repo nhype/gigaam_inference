@@ -41,7 +41,8 @@ app = FastAPI(
     title="Audio Transcription API",
     description="API for transcribing audio files using Gigaam model",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None  # Disable the /docs endpoint
 )
 
 # Add CORS middleware
