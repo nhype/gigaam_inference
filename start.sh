@@ -29,12 +29,23 @@ start_service() {
     echo "⏳ Waiting for services to be ready..."
     sleep 15
     
-    # Check if API service is healthy
-    echo "🔍 Checking API service..."
+    # Check if load balancer is healthy
+    echo "🔍 Checking load balancer..."
     if curl -k -f https://localhost:4443/health &> /dev/null; then
-        echo "✅ API service is running successfully!"
+        echo "✅ Load balancer is running successfully!"
     else
-        echo "❌ API service failed to start properly"
+        echo "❌ Load balancer failed to start properly"
+        docker compose logs nginx-load-balancer
+        exit 1
+    fi
+
+    # Check if API service replicas are healthy
+    echo "🔍 Checking API service replicas..."
+    if docker compose ps audio-transcription-api | grep -q "Up"; then
+        echo "✅ API service replicas are running!"
+        echo "   $(docker compose ps audio-transcription-api | grep "Up" | wc -l) replicas active"
+    else
+        echo "❌ API service replicas failed to start properly"
         docker compose logs audio-transcription-api
         exit 1
     fi
@@ -126,13 +137,18 @@ check_status() {
         docker compose ps
         echo ""
         
-        # Check API health
-        echo "🔍 API Health Check:"
+        # Check load balancer health
+        echo "🔍 Load Balancer Health Check:"
         if curl -k -s https://localhost:4443/health | jq . 2>/dev/null; then
-            echo "✅ API is healthy"
+            echo "✅ Load balancer is healthy"
         else
-            echo "❌ API is not responding"
+            echo "❌ Load balancer is not responding"
         fi
+
+        # Check API replicas
+        echo "🔍 API Replicas Status:"
+        replica_count=$(docker compose ps audio-transcription-api | grep "Up" | wc -l)
+        echo "   $replica_count API replicas running"
         echo ""
         
         # Check frontend
@@ -142,10 +158,11 @@ check_status() {
         else
             echo "❌ Frontend is not responding"
         fi
-        echo ""
-        echo "🔒 Services are running on HTTPS-only:"
-        echo "   🎤 Frontend: https://localhost:4446"
-        echo "   📡 API: https://localhost:4443"
+    echo ""
+    echo "🔒 Services are running on HTTPS-only:"
+    echo "   🎤 Frontend: https://localhost:4446"
+    echo "   📡 Load Balancer: https://localhost:4443"
+    echo "   📊 Backend: $replica_count API replicas with load balancing"
     else
         echo "❌ No services are running"
         echo "💡 Start services with: $0 start"

@@ -3,13 +3,14 @@ version: '3.8'
 services:
   audio-transcription-api:
     build: .
-    container_name: audio-transcription-api
     ports:
-      - "4443:4443"   # HTTPS only
+      - "4443"   # HTTPS only - let Docker assign host ports
     environment:
       - PYTHONUNBUFFERED=1
       - SSL_CERT_PATH=/app/certs/fullchain.pem
       - SSL_KEY_PATH=/app/certs/privkey.pem
+      - UVICORN_WORKERS=4  # 4 workers per container for better concurrency
+      - DEV_MODE=true  # Run in HTTP mode for internal Docker communication
     volumes:
       # Optional: Mount a volume for temporary files if needed
       - /tmp/audio-processing:/tmp
@@ -23,6 +24,27 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      replicas: 2  # 2 container replicas for horizontal scaling
+
+  nginx-load-balancer:
+    image: nginx:alpine
+    container_name: audio-transcription-lb
+    ports:
+      - "4443:443"  # Expose load balancer on port 4443 (same as before)
+    volumes:
+      - ./nginx-lb.conf:/etc/nginx/nginx.conf:ro
+      - /root/n8n-certs/fullchain.pem:/etc/ssl/certs/fullchain.pem:ro
+      - /root/n8n-certs/privkey.pem:/etc/ssl/private/privkey.pem:ro
+    depends_on:
+      - audio-transcription-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   audio-transcription-frontend:
     build: ./frontend
