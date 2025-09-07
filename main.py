@@ -20,6 +20,9 @@ GIGAAM_MODEL = "v2_ctc"
 MAX_CONCURRENT_TRANSCRIPTIONS = 4  # Limit concurrent transcription tasks
 TRANSCRIPTION_SEMAPHORE = None  # Will be initialized in lifespan
 
+# Service configuration
+FAIL_WITHOUT_MODEL = os.environ.get('FAIL_WITHOUT_MODEL', 'true').lower() == 'true'
+
 # Global model instance
 model = None
 
@@ -37,10 +40,14 @@ async def lifespan(app: FastAPI):
         print(f"Initialized semaphore with {MAX_CONCURRENT_TRANSCRIPTIONS} concurrent transcription slots")
     except Exception as e:
         print(f"Error loading model: {e}")
-        print("Continuing without model - transcription will fail but service will be available")
-        model = None
-        # Still initialize semaphore for when model is available
-        TRANSCRIPTION_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTIONS)
+        if FAIL_WITHOUT_MODEL:
+            print("FAIL_WITHOUT_MODEL is enabled - exiting application")
+            raise RuntimeError(f"Failed to load transcription model: {e}")
+        else:
+            print("Continuing without model - transcription will fail but service will be available")
+            model = None
+            # Still initialize semaphore for when model is available
+            TRANSCRIPTION_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTIONS)
 
     yield
 
@@ -72,8 +79,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     global model
-    model_status = "loaded" if model is not None else "not_loaded"
-    return {"status": "healthy", "model": GIGAAM_MODEL, "model_status": model_status}
+    if model is None:
+        return JSONResponse(
+            status_code=503,  # Service Unavailable
+            content={"status": "unhealthy", "model": GIGAAM_MODEL, "model_status": "not_loaded", "error": "Transcription model not available"}
+        )
+    return {"status": "healthy", "model": GIGAAM_MODEL, "model_status": "loaded"}
 
 def get_audio_duration(file_path: str) -> float:
     """Get audio file duration in seconds using FFmpeg"""
@@ -260,7 +271,7 @@ async def transcribe_with_gigaam(audio_path: str) -> str:
     global model, TRANSCRIPTION_SEMAPHORE
 
     if model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
+        raise HTTPException(status_code=503, detail="Transcription model not available. Service is starting up or model failed to load.")
 
     if TRANSCRIPTION_SEMAPHORE is None:
         raise HTTPException(status_code=500, detail="Service not properly initialized")
