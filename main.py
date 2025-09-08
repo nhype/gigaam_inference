@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -11,6 +11,9 @@ import asyncio
 from pathlib import Path
 import shutil
 import gigaam
+import logging
+import traceback
+from datetime import datetime
 
 # Configuration
 MAX_DURATION = 20  # Maximum duration per chunk in seconds
@@ -23,6 +26,21 @@ TRANSCRIPTION_SEMAPHORE = None  # Will be initialized in lifespan
 # Service configuration
 FAIL_WITHOUT_MODEL = os.environ.get('FAIL_WITHOUT_MODEL', 'true').lower() == 'true'
 
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('/tmp/transcription_app.log', mode='a')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Suppress PyTorch security warning for trusted model loading
+import warnings
+warnings.filterwarnings("ignore", message=".*torch.load.*weights_only.*", category=FutureWarning)
+
 # Global model instance
 model = None
 
@@ -31,20 +49,20 @@ async def lifespan(app: FastAPI):
     # Startup
     global model, TRANSCRIPTION_SEMAPHORE
     try:
-        print(f"Loading Gigaam model: {GIGAAM_MODEL}")
+        logger.info(f"Loading Gigaam model: {GIGAAM_MODEL}")
         model = gigaam.load_model(GIGAAM_MODEL)
-        print("Model loaded successfully")
+        logger.info("Model loaded successfully")
 
         # Initialize semaphore for limiting concurrent transcriptions
         TRANSCRIPTION_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTIONS)
-        print(f"Initialized semaphore with {MAX_CONCURRENT_TRANSCRIPTIONS} concurrent transcription slots")
+        logger.info(f"Initialized semaphore with {MAX_CONCURRENT_TRANSCRIPTIONS} concurrent transcription slots")
     except Exception as e:
-        print(f"Error loading model: {e}")
+        logger.error(f"Error loading model: {e}", exc_info=True)
         if FAIL_WITHOUT_MODEL:
-            print("FAIL_WITHOUT_MODEL is enabled - exiting application")
+            logger.error("FAIL_WITHOUT_MODEL is enabled - exiting application")
             raise RuntimeError(f"Failed to load transcription model: {e}")
         else:
-            print("Continuing without model - transcription will fail but service will be available")
+            logger.warning("Continuing without model - transcription will fail but service will be available")
             model = None
             # Still initialize semaphore for when model is available
             TRANSCRIPTION_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTIONS)
@@ -53,6 +71,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown (if needed)
     # Clean up resources here if necessary
+    logger.info("Application shutdown initiated")
     pass
 
 app = FastAPI(
@@ -89,7 +108,8 @@ async def health_check():
 def get_audio_duration(file_path: str) -> float:
     """Get audio file duration in seconds using FFmpeg"""
     import re
-    
+
+    logger.debug(f"Getting audio duration for: {file_path}")
     try:
         # Method 1: Try format duration first
         cmd = [
@@ -156,7 +176,7 @@ def get_audio_duration(file_path: str) -> float:
             pass
         
         # Method 4: Parse ffmpeg stderr output as last resort
-        print(f"Warning: Could not get duration directly, using ffmpeg stderr parsing")
+        logger.warning(f"Could not get duration directly, using ffmpeg stderr parsing for {file_path}")
         cmd_ffmpeg = [
             "ffmpeg", "-i", file_path, "-f", "null", "-"
         ]
@@ -180,11 +200,11 @@ def get_audio_duration(file_path: str) -> float:
             hours, minutes, seconds = last_time
             total_seconds = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
             if total_seconds > 0:
-                print(f"Duration found from ffmpeg progress: {total_seconds} seconds")
+                logger.info(f"Duration found from ffmpeg progress: {total_seconds} seconds for {file_path}")
                 return float(total_seconds)
         
         # Method 5: Use ffmpeg with more verbose output to get duration
-        print(f"Warning: Trying verbose ffmpeg parsing for {file_path}")
+        logger.warning(f"Trying verbose ffmpeg parsing for {file_path}")
         cmd_verbose = [
             "ffmpeg", "-i", file_path, "-hide_banner", "-f", "null", "-"
         ]
@@ -213,7 +233,7 @@ def get_audio_duration(file_path: str) -> float:
                     total_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds)
                 
                 if total_seconds > 0:
-                    print(f"Duration found via pattern {pattern}: {total_seconds} seconds")
+                    logger.info(f"Duration found via pattern {pattern}: {total_seconds} seconds for {file_path}")
                     return float(total_seconds)
         
         # Method 6: Try mediainfo if available
@@ -225,26 +245,28 @@ def get_audio_duration(file_path: str) -> float:
                 if duration_ms and duration_ms.isdigit():
                     duration_seconds = float(duration_ms) / 1000.0
                     if duration_seconds > 0:
-                        print(f"Duration found via mediainfo: {duration_seconds} seconds")
+                        logger.info(f"Duration found via mediainfo: {duration_seconds} seconds for {file_path}")
                         return duration_seconds
         except FileNotFoundError:
-            pass  # mediainfo not installed
-        
+            logger.debug(f"mediainfo not installed, skipping for {file_path}")
+
         # If we absolutely cannot determine duration, raise an error instead of guessing
+        logger.error(f"Cannot determine duration for {file_path}. File may be corrupted or in an unsupported format.")
         raise ValueError(f"Cannot determine duration for {file_path}. File may be corrupted or in an unsupported format.")
-        
+
     except subprocess.CalledProcessError as e:
-        print(f"Error running ffprobe/ffmpeg: {e}")
-        print(f"Command output: {e.stdout if hasattr(e, 'stdout') else 'N/A'}")
-        print(f"Command error: {e.stderr if hasattr(e, 'stderr') else 'N/A'}")
+        logger.error(f"Error running ffprobe/ffmpeg on {file_path}: {e}")
+        logger.debug(f"Command output: {e.stdout if hasattr(e, 'stdout') else 'N/A'}")
+        logger.debug(f"Command error: {e.stderr if hasattr(e, 'stderr') else 'N/A'}")
         raise ValueError(f"Failed to analyze audio file {file_path}: {str(e)}")
     except Exception as e:
-        print(f"Unexpected error getting audio duration: {e}")
+        logger.error(f"Unexpected error getting audio duration for {file_path}: {e}", exc_info=True)
         raise
 
 def split_audio(input_path: str, output_dir: str, segment_duration: int = MAX_DURATION) -> List[str]:
     """Split audio file into segments using FFmpeg"""
     try:
+        logger.debug(f"Splitting audio file {input_path} into {segment_duration}s segments")
         output_pattern = os.path.join(output_dir, "segment_%03d.webm")
         cmd = [
             "ffmpeg", "-i", input_path,
@@ -255,15 +277,17 @@ def split_audio(input_path: str, output_dir: str, segment_duration: int = MAX_DU
             output_pattern
         ]
         subprocess.run(cmd, capture_output=True, check=True)
-        
+
         # Get list of created segments
         segments = []
         for file in sorted(os.listdir(output_dir)):
             if file.startswith("segment_") and file.endswith(".webm"):
                 segments.append(os.path.join(output_dir, file))
-        
+
+        logger.info(f"Successfully split {input_path} into {len(segments)} segments")
         return segments
     except subprocess.CalledProcessError as e:
+        logger.error(f"Error splitting audio file {input_path}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error splitting audio: {str(e)}")
 
 async def transcribe_with_gigaam(audio_path: str) -> str:
@@ -271,14 +295,17 @@ async def transcribe_with_gigaam(audio_path: str) -> str:
     global model, TRANSCRIPTION_SEMAPHORE
 
     if model is None:
+        logger.error(f"Transcription model not available for file: {audio_path}")
         raise HTTPException(status_code=503, detail="Transcription model not available. Service is starting up or model failed to load.")
 
     if TRANSCRIPTION_SEMAPHORE is None:
+        logger.error(f"Service not properly initialized for file: {audio_path}")
         raise HTTPException(status_code=500, detail="Service not properly initialized")
 
     try:
         # Limit concurrent transcriptions using semaphore
         async with TRANSCRIPTION_SEMAPHORE:
+            logger.debug(f"Starting transcription for file: {audio_path}")
             # Run transcription in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             transcription = await loop.run_in_executor(
@@ -286,8 +313,10 @@ async def transcribe_with_gigaam(audio_path: str) -> str:
                 model.transcribe,
                 audio_path
             )
+            logger.debug(f"Transcription completed for file: {audio_path}, length: {len(transcription)}")
             return transcription
     except Exception as e:
+        logger.error(f"Transcription failed for file {audio_path}: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
 
 @app.post("/transcribe")
@@ -296,14 +325,18 @@ async def transcribe_audio(file: UploadFile = File(...)):
     Transcribe audio file. If longer than 29 seconds, splits into chunks first.
     Returns only the full transcription text.
     """
+    request_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    logger.info(f"[{request_id}] Starting transcription request for file: {file.filename}, content_type: {file.content_type}")
+
     # Validate file type
     if not file.content_type or not file.content_type.startswith("audio/"):
         if not file.filename or not file.filename.lower().endswith(".webm"):
+            logger.warning(f"[{request_id}] Invalid file type - filename: {file.filename}, content_type: {file.content_type}")
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="Only audio files (preferably WebM) are supported"
             )
-    
+
     # Create temporary directory for processing
     with tempfile.TemporaryDirectory() as temp_dir:
         # Save uploaded file
@@ -311,45 +344,47 @@ async def transcribe_audio(file: UploadFile = File(...)):
         try:
             with open(input_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            print(f"File saved to: {input_path}")
+            logger.info(f"[{request_id}] File saved to: {input_path}, size: {os.path.getsize(input_path)} bytes")
         except Exception as e:
-            print(f"Error saving file: {e}")
+            logger.error(f"[{request_id}] Error saving file: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
         
         try:
             # Try to get audio duration
-            print(f"Getting duration for: {input_path}")
+            logger.info(f"[{request_id}] Getting duration for: {input_path}")
             try:
                 duration = get_audio_duration(input_path)
-                print(f"Audio duration: {duration} seconds")
+                logger.info(f"[{request_id}] Audio duration: {duration} seconds")
             except ValueError as e:
-                print(f"Warning: Could not determine duration: {e}")
-                print("Attempting direct transcription without duration check")
+                logger.warning(f"[{request_id}] Could not determine duration: {e}")
+                logger.info(f"[{request_id}] Attempting direct transcription without duration check")
                 # Try to transcribe directly without knowing duration
                 # If it fails due to being too long, split it with trial segments
                 try:
                     transcription = await transcribe_with_gigaam(input_path)
+                    logger.info(f"[{request_id}] Direct transcription successful")
                     return JSONResponse(content={
                         "filename": file.filename,
                         "duration": "unknown",
                         "transcription": transcription
                     })
                 except Exception as transcribe_error:
-                    print(f"Direct transcription failed: {transcribe_error}")
-                    print("Attempting to split file with default segment size")
+                    logger.warning(f"[{request_id}] Direct transcription failed: {transcribe_error}")
+                    logger.info(f"[{request_id}] Attempting to split file with default segment size")
                     # Try splitting with default segment size
                     segments_dir = os.path.join(temp_dir, "segments")
                     os.makedirs(segments_dir, exist_ok=True)
                     segments = split_audio(input_path, segments_dir, MAX_DURATION)
-                    print(f"Created {len(segments)} segments")
+                    logger.info(f"[{request_id}] Created {len(segments)} segments")
                     
                     transcriptions = []
                     for i, segment_path in enumerate(segments):
-                        print(f"Transcribing segment {i+1}/{len(segments)}: {segment_path}")
+                        logger.info(f"[{request_id}] Transcribing segment {i+1}/{len(segments)}: {segment_path}")
                         transcription = await transcribe_with_gigaam(segment_path)
                         transcriptions.append(transcription)
-                    
+
                     full_text = " ".join(transcriptions)
+                    logger.info(f"[{request_id}] Segmented transcription completed, total segments: {len(segments)}")
                     return JSONResponse(content={
                         "filename": file.filename,
                         "duration": "unknown (segmented)",
@@ -360,41 +395,39 @@ async def transcribe_audio(file: UploadFile = File(...)):
             
             if duration <= MAX_DURATION:
                 # File is short enough, transcribe directly
-                print("File is short, transcribing directly")
+                logger.info(f"[{request_id}] File is short ({duration}s), transcribing directly")
                 transcription = await transcribe_with_gigaam(input_path)
                 transcriptions.append(transcription)
             else:
                 # Split file into segments
-                print(f"File is long ({duration}s), splitting into segments")
+                logger.info(f"[{request_id}] File is long ({duration}s), splitting into segments")
                 segments_dir = os.path.join(temp_dir, "segments")
                 os.makedirs(segments_dir, exist_ok=True)
-                
+
                 segments = split_audio(input_path, segments_dir, MAX_DURATION)
-                print(f"Created {len(segments)} segments")
-                
+                logger.info(f"[{request_id}] Created {len(segments)} segments")
+
                 # Transcribe each segment
                 for i, segment_path in enumerate(segments):
-                    print(f"Transcribing segment {i+1}/{len(segments)}: {segment_path}")
+                    logger.info(f"[{request_id}] Transcribing segment {i+1}/{len(segments)}: {segment_path}")
                     transcription = await transcribe_with_gigaam(segment_path)
                     transcriptions.append(transcription)
             
             # Combine all transcriptions
             full_text = " ".join(transcriptions)
-            print(f"Transcription completed. Length: {len(full_text)} characters")
-            
+            logger.info(f"[{request_id}] Transcription completed successfully. Length: {len(full_text)} characters")
+
             return JSONResponse(content={
                 "filename": file.filename,
                 "duration": duration,
                 "transcription": full_text
             })
-            
+
         except HTTPException:
             # Re-raise HTTP exceptions as-is
             raise
         except Exception as e:
-            print(f"Detailed error: {type(e).__name__}: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[{request_id}] Processing error: {type(e).__name__}: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
 if __name__ == "__main__":
