@@ -25,6 +25,8 @@ RUN mkdir -p /app/certs
 
 # Create a non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Add appuser to docker group to access Docker socket for health checks
+RUN groupadd -g 988 docker 2>/dev/null || true && usermod -aG docker appuser
 USER appuser
 
 # Expose port 4443 (HTTPS only)

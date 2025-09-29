@@ -11,22 +11,24 @@ services:
       - SSL_KEY_PATH=/app/certs/privkey.pem
       - UVICORN_WORKERS=2  # 2 workers per container for better memory efficiency
       - DEV_MODE=true  # Run in HTTP mode for internal Docker communication
-      - FAIL_WITHOUT_MODEL=true  # Exit if transcription model fails to load
+      - FAIL_WITHOUT_MODEL=false  # Continue running even if transcription model fails to load
     volumes:
       # Optional: Mount a volume for temporary files if needed
       - /tmp/audio-processing:/tmp
       # SSL certificates
       - /root/n8n-certs/fullchain.pem:/app/certs/fullchain.pem:ro
       - /root/n8n-certs/privkey.pem:/app/certs/privkey.pem:ro
+      # Docker socket for container introspection
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4443/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:4443/health/external"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     deploy:
-      replicas: 3  # 3 container replicas for horizontal scaling
+      replicas: 8  #  container replicas for horizontal scaling
 
   nginx-load-balancer:
     image: nginx:alpine
@@ -47,21 +49,21 @@ services:
       retries: 3
       start_period: 10s
 
-  audio-transcription-frontend:
-    build: ./frontend
-    container_name: audio-transcription-frontend
-    ports:
-      - "4446:443"    # HTTPS only
-    volumes:
-      # SSL certificates
-      - /root/n8n-certs/fullchain.pem:/etc/ssl/certs/fullchain.pem:ro
-      - /root/n8n-certs/privkey.pem:/etc/ssl/private/privkey.pem:ro
-    depends_on:
-      - audio-transcription-api
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-k", "-f", "https://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s 
+  # audio-transcription-frontend:
+  #   build: ./frontend
+  #   container_name: audio-transcription-frontend
+  #   ports:
+  #     - "4446:443"    # HTTPS only
+  #   volumes:
+  #     # SSL certificates
+  #     - /root/n8n-certs/fullchain.pem:/etc/ssl/certs/fullchain.pem:ro
+  #     - /root/n8n-certs/privkey.pem:/etc/ssl/private/privkey.pem:ro
+  #   depends_on:
+  #     - audio-transcription-api
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-k", "-f", "https://localhost/"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s 

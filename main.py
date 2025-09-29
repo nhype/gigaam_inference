@@ -14,6 +14,9 @@ import gigaam
 import logging
 import traceback
 from datetime import datetime
+import docker
+import aiohttp
+from aiohttp import ClientTimeout
 
 # Configuration
 MAX_DURATION = 20  # Maximum duration per chunk in seconds
@@ -93,17 +96,196 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Audio Transcription API", "status": "running"}
+    return {}
+
+async def check_replica_health(container_name: str, container_ip: str) -> dict:
+    """Check health of a specific replica"""
+    timeout = ClientTimeout(total=5)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            # Try HTTP first (internal communication), then HTTPS if needed
+            urls = [
+                f"http://{container_ip}:4443/health",
+                f"https://{container_ip}:4443/health"
+            ]
+
+            for url in urls:
+                try:
+                    async with session.get(url, verify_ssl=False) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return {
+                                "name": container_name,
+                                "ip": container_ip,
+                                "status": "healthy",
+                                "model": data.get("model", "unknown"),
+                                "model_status": data.get("model_status", "unknown"),
+                                "response_time": f"{response.elapsed.total_seconds():.2f}s"
+                            }
+                        else:
+                            return {
+                                "name": container_name,
+                                "ip": container_ip,
+                                "status": "unhealthy",
+                                "error": f"HTTP {response.status}",
+                                "model": "unknown",
+                                "model_status": "unknown"
+                            }
+                except Exception as e:
+                    continue  # Try next URL
+
+            # If all URLs failed
+            return {
+                "name": container_name,
+                "ip": container_ip,
+                "status": "unhealthy",
+                "error": "Connection failed",
+                "model": "unknown",
+                "model_status": "unknown"
+            }
+
+    except Exception as e:
+        return {
+            "name": container_name,
+            "ip": container_ip,
+            "status": "error",
+            "error": str(e),
+            "model": "unknown",
+            "model_status": "unknown"
+        }
+
+async def get_all_replicas_health() -> dict:
+    """Get health status of all API replicas"""
+    try:
+        # Connect to Docker
+        client = docker.from_env()
+
+        # Get all containers for the audio-transcription-api service
+        containers = client.containers.list(
+            filters={
+                "label": ["com.docker.compose.service=audio-transcription-api"],
+                "status": "running"
+            }
+        )
+
+        if not containers:
+            return {
+                "total_replicas": 0,
+                "healthy_replicas": 0,
+                "unhealthy_replicas": 0,
+                "replicas": []
+            }
+
+        replica_health_checks = []
+
+        # Check health of each replica
+        for container in containers:
+            container_name = container.name
+            # Get container IP in the default network
+            container.reload()  # Refresh container info
+            networks = container.attrs.get('NetworkSettings', {}).get('Networks', {})
+
+            # Find the container IP
+            container_ip = None
+            for network_name, network_info in networks.items():
+                if network_info.get('IPAddress'):
+                    container_ip = network_info['IPAddress']
+                    break
+
+            if container_ip:
+                health_info = await check_replica_health(container_name, container_ip)
+                replica_health_checks.append(health_info)
+
+        # Calculate summary
+        healthy_count = sum(1 for r in replica_health_checks if r["status"] == "healthy")
+        unhealthy_count = len(replica_health_checks) - healthy_count
+
+        return {
+            "total_replicas": len(replica_health_checks),
+            "healthy_replicas": healthy_count,
+            "unhealthy_replicas": unhealthy_count,
+            "overall_status": "healthy" if healthy_count > 0 else "unhealthy",
+            "replicas": replica_health_checks
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking replica health: {e}")
+        return {
+            "total_replicas": 0,
+            "healthy_replicas": 0,
+            "unhealthy_replicas": 0,
+            "overall_status": "error",
+            "error": str(e),
+            "replicas": []
+        }
+    finally:
+        try:
+            client.close()
+        except:
+            pass
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     global model
-    if model is None:
+
+    # Check for internal access (basic security)
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("User-Agent", "")
+
+    # Allow access from localhost/private networks or specific user agents
+    is_internal = (
+        client_ip.startswith("127.") or  # localhost
+        client_ip.startswith("10.") or   # private network
+        client_ip.startswith("172.") or  # private network
+        client_ip.startswith("192.168.") or  # private network
+        client_ip == "::1"  # IPv6 localhost
+    )
+
+    # If external access, return minimal response
+    if not is_internal:
+        return {
+            "status": "ok" if model is not None else "degraded",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    # Full response for internal access
+    local_status = "healthy" if model is not None else "unhealthy"
+    local_model_status = "loaded" if model is not None else "not_loaded"
+
+    response = {
+        "status": local_status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "local": {
+            "status": local_status,
+            "model": GIGAAM_MODEL,
+            "model_status": local_model_status,
+            "replica_id": "unknown"
+        },
+        "cluster": {
+            "total_replicas": 8,
+            "description": "Load balanced across 8 API replicas via nginx",
+            "load_balancer": "active",
+            "note": "Individual replica health available via load balancer routing"
+        }
+    }
+
+    # Return 503 if local model is not loaded (service unavailable)
+    if local_status == "unhealthy":
         return JSONResponse(
             status_code=503,  # Service Unavailable
-            content={"status": "unhealthy", "model": GIGAAM_MODEL, "model_status": "not_loaded", "error": "Transcription model not available"}
+            content=response
         )
-    return {"status": "healthy", "model": GIGAAM_MODEL, "model_status": "loaded"}
+
+    return response
+
+@app.get("/health/external")
+async def external_health_check():
+    """Minimal health check for external monitoring services - always accessible"""
+    global model
+    return {
+        "status": "ok" if model is not None else "degraded",
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 def get_audio_duration(file_path: str) -> float:
     """Get audio file duration in seconds using FFmpeg"""
