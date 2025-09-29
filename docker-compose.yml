@@ -9,7 +9,7 @@ services:
       - PYTHONUNBUFFERED=1
       - SSL_CERT_PATH=/app/certs/fullchain.pem
       - SSL_KEY_PATH=/app/certs/privkey.pem
-      - UVICORN_WORKERS=4  # 4 workers per container for better concurrency
+      - UVICORN_WORKERS=2  # 2 workers per container for better memory efficiency
       - DEV_MODE=true  # Run in HTTP mode for internal Docker communication
       - FAIL_WITHOUT_MODEL=true  # Exit if transcription model fails to load
     volumes:
@@ -26,7 +26,7 @@ services:
       retries: 3
       start_period: 40s
     deploy:
-      replicas: 2  # 2 container replicas for horizontal scaling
+      replicas: 3  # 3 container replicas for horizontal scaling
 
   nginx-load-balancer:
     image: nginx:alpine
